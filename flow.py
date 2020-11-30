@@ -16,14 +16,6 @@ tfkc = tfk.callbacks
 K = tfk.backend
 
 
-def fully_connected(n_dim, n_layer=3, n_hid=512, activaiton='relu'):
-    '''Fully connected neural networks'''
-    nn = tfk.Sequential(name='neural_net')
-    for _ in range(n_layer - 1):
-        nn.add(tfkl.Dense(n_hid, activation=activaiton))
-    nn.add(tfkl.Dense(n_dim//2, activation='linear'))
-    return nn
-
 class NN(tfkl.Layer):
     def __init__(self, n_dim, n_layer=3, n_hid=512, activation='relu', name='fc_layer'):
         super(NN, self).__init__(name=name)
@@ -33,8 +25,10 @@ class NN(tfkl.Layer):
         self.layer_list = []
         for _ in range(n_layer):
             self.layer_list.append(tfkl.Dense(n_hid, activation=activation))
-        self.log_s_layer = tfkl.Dense(n_dim//2, activation='tanh', name='log_s_layer')
-        self.t_layer = tfkl.Dense(n_dim//2, activation='linear', name='t_layer')
+        self.log_s_layer = tfkl.Dense(
+            n_dim//2, activation='tanh', name='log_s_layer')
+        self.t_layer = tfkl.Dense(
+            n_dim//2, activation='linear', name='t_layer')
 
     def call(self, x):
         for layer in self.layer_list:
@@ -42,50 +36,6 @@ class NN(tfkl.Layer):
         log_s = self.log_s_layer(x)
         t = self.t_layer(x)
         return log_s, t
-
-
-class AdditiveCouplingLayer(tfkl.Layer):
-    '''Implementation of Additive Coupling layers in Dinh et al (2015)
-
-    # forward
-    y1 = x1
-    y2 = x2 + m(x1)
-    # inverse
-    x1 = y1
-    x2 = y2 - m(y1)
-    '''
-
-    def __init__(self, inp_dim, n_hid_layer, n_hid_dim, name):
-        super(AdditiveCouplingLayer, self).__init__(name=name)
-        self.inp_dim = inp_dim
-        self.n_hid_layer = n_hid_layer
-        self.n_hid_dim = n_hid_dim
-        self.m = fully_connected(inp_dim, n_hid_layer, n_hid_dim)
-        self.permute = tfkl.Lambda(lambda x: tf.gather(
-            x, list(reversed(range(x.shape[-1]))), axis=-1))
-
-    def call(self, x):
-        x = self.permute(x)
-        x1, x2 = self.split(x)
-        mx1 = self.m(x1)
-        y1 = x1
-        y2 = x2 + mx1
-        y = tf.concat([y1, y2], axis=-1)
-        return y
-
-    def inverse(self, y):
-        y1, y2 = self.split(y)
-        my1 = self.m(y1)
-        x1 = y1
-        x2 = y2 - my1
-        x = tf.concat([x1, x2], axis=-1)
-        x = self.permute(x)
-        return x
-
-    def split(self, x):
-        dim = self.inp_dim
-        x = tf.reshape(x, [-1, dim])
-        return x[:, :dim//2], x[:, dim//2:]
 
 
 class NVPCouplingLayer(tfkl.Layer):
@@ -105,8 +55,6 @@ class NVPCouplingLayer(tfkl.Layer):
         self.n_hid_dim = n_hid_dim
         self.shuffle_type = shuffle_type
         self.nn = NN(inp_dim, n_hid_layer, n_hid_dim)
-        self.permute = tfkl.Lambda(lambda x: tf.gather(
-            x, list(reversed(range(x.shape[-1]))), axis=-1))
         self.idx = tf.Variable(list(range(self.inp_dim)),
                                shape=(self.inp_dim,),
                                trainable=False,
@@ -118,7 +66,6 @@ class NVPCouplingLayer(tfkl.Layer):
             self.idx.assign(tf.reverse(self.idx, axis=[0]))
 
     def call(self, x):
-        # x = self.permute(x)
         x = self.shuffle(x, isInverse=False)
         x1, x2 = self.split(x)
         log_s, t = self.nn(x1)
@@ -136,7 +83,6 @@ class NVPCouplingLayer(tfkl.Layer):
         x1 = y1
         x2 = (y2 - t)/tf.math.exp(log_s)
         x = tf.concat([x1, x2], axis=-1)
-        # x = self.permute(x)
         x = self.shuffle(x, isInverse=True)
         return x
 
@@ -146,7 +92,8 @@ class NVPCouplingLayer(tfkl.Layer):
             idx = self.idx
         else:
             # Inverse
-            idx = tf.map_fn(tf.math.invert_permutation, tf.expand_dims(self.idx, 0))
+            idx = tf.map_fn(tf.math.invert_permutation,
+                            tf.expand_dims(self.idx, 0))
             idx = tf.squeeze(idx)
         x = tf.transpose(x)
         x = tf.gather(x, idx)
@@ -159,9 +106,9 @@ class NVPCouplingLayer(tfkl.Layer):
         return x[:, :dim//2], x[:, dim//2:]
 
 
-class TwoNVPCouplingLayer(tfkl.Layer):
+class TwoNVPCouplingLayers(tfkl.Layer):
     def __init__(self, inp_dim, n_hid_layer, n_hid_dim, name, shuffle_type):
-        super(TwoNVPCouplingLayer, self).__init__(name=name)
+        super(TwoNVPCouplingLayers, self).__init__(name=name)
         '''Implementation of Coupling layers in Ardizzone et al (2018)
 
         # Forward
@@ -216,7 +163,8 @@ class TwoNVPCouplingLayer(tfkl.Layer):
             idx = self.idx
         else:
             # Inverse
-            idx = tf.map_fn(tf.math.invert_permutation, tf.expand_dims(self.idx, 0))
+            idx = tf.map_fn(tf.math.invert_permutation,
+                            tf.expand_dims(self.idx, 0))
             idx = tf.squeeze(idx)
         x = tf.transpose(x)
         x = tf.gather(x, idx)
@@ -226,28 +174,12 @@ class TwoNVPCouplingLayer(tfkl.Layer):
     def split(self, x):
         dim = self.inp_dim
         x = tf.reshape(x, [-1, dim])
-        return x[:, :dim//2], x[:, dim//2:]        
+        return x[:, :dim//2], x[:, dim//2:]
 
 
-class ScalingLayer(tfkl.Layer):
-    def __init__(self, inp_dim):
-        super(ScalingLayer, self).__init__(name='ScalingLayer')
-        self.inp_dim = inp_dim
-        self.scaling = tf.Variable(shape=(inp_dim,),
-                                   trainable=True,
-                                   initial_value=tfk.initializers.glorot_uniform()((inp_dim,)))
-
-    def call(self, x):
-        self.add_loss(-tf.math.reduce_sum(self.scaling))
-        return tf.math.exp(self.scaling) * x
-
-    def inverse(self, y):
-        return tf.math.exp(-self.scaling) * y
-
-
-class RealNVP(tfk.Model):
+class NVP(tfk.Model):
     def __init__(self, inp_dim, n_couple_layer, n_hid_layer, n_hid_dim, name, shuffle_type='reverse'):
-        super(RealNVP, self).__init__(name=name)
+        super(NVP, self).__init__(name=name)
         self.inp_dim = inp_dim
         self.n_couple_layer = n_couple_layer
         self.n_hid_layer = n_hid_layer
@@ -255,8 +187,8 @@ class RealNVP(tfk.Model):
         self.shuffle_type = shuffle_type
         self.AffineLayers = []
         for i in range(n_couple_layer):
-            layer = NVPCouplingLayer(
-                inp_dim, n_hid_layer, n_hid_dim, 
+            layer = TwoNVPCouplingLayers(
+                inp_dim, n_hid_layer, n_hid_dim,
                 name=f'Layer{i}', shuffle_type=shuffle_type)
             self.AffineLayers.append(layer)
 
@@ -274,65 +206,33 @@ class RealNVP(tfk.Model):
             x = self.AffineLayers[i].inverse(x)
         return x
 
-class RealNVP2(tfk.Model):
-    def __init__(self, inp_dim, n_couple_layer, n_hid_layer, n_hid_dim, name, shuffle_type='reverse'):
-        super(RealNVP2, self).__init__(name=name)
-        self.inp_dim = inp_dim
-        self.n_couple_layer = n_couple_layer
-        self.n_hid_layer = n_hid_layer
-        self.n_hid_dim = n_hid_dim
-        self.shuffle_type = shuffle_type
-        self.AffineLayers = []
-        for i in range(n_couple_layer):
-            layer = TwoNVPCouplingLayer(
-                inp_dim, n_hid_layer, n_hid_dim, 
-                name=f'Layer{i}', shuffle_type=shuffle_type)
-            self.AffineLayers.append(layer)
 
-    def call(self, x):
-        '''Forward: data (x) --> latent (z); inference'''
-        z = x
-        for i in range(self.n_couple_layer):
-            z = self.AffineLayers[i](z)
-        return z
-
-    def inverse(self, z):
-        '''Inverse: latent (z) --> data (y); sampling'''
-        x = z
-        for i in reversed(range(self.n_couple_layer)):
-            x = self.AffineLayers[i].inverse(x)
-        return x        
+def MSE(y_true, y_pred):
+    return tf.reduce_mean(tfk.losses.mean_squared_error(y_true, y_pred))
 
 
-class NICE(tfk.Model):
-    def __init__(self, inp_dim, n_couple_layer, n_hid_layer, n_hid_dim, name):
-        super(NICE, self).__init__(name=name)
-        self.inp_dim = inp_dim
-        self.n_couple_layer = n_couple_layer
-        self.n_hid_layer = n_hid_layer
-        self.n_hid_dim = n_hid_dim
-        self.AffineLayers = []
-        for i in range(n_couple_layer):
-            layer = AdditiveCouplingLayer(
-                inp_dim, n_hid_layer, n_hid_dim, name=f'Layer{i}')
-            self.AffineLayers.append(layer)
-        self.scale = ScalingLayer(inp_dim)
-        self.AffineLayers.append(self.scale)
+def MMD_multiscale(x, y):
+    xx = tf.linalg.matmul(x, tf.transpose(x))
+    yy = tf.linalg.matmul(y, tf.transpose(y))
+    zz = tf.linalg.matmul(x, tf.transpose(y))
 
-    def call(self, x):
-        '''Forward: data (x) --> latent (z); inference'''
-        z = x
-        for i in range(self.n_couple_layer):
-            z = self.AffineLayers[i](z)
-        z = self.scale(z)
-        return z
+    rx = tf.broadcast_to(tf.linalg.diag_part(xx), xx.shape)
+    ry = tf.broadcast_to(tf.linalg.diag_part(yy), yy.shape)
 
-    def inverse(self, z):
-        '''Inverse: latent (z) --> data (y); sampling'''
-        x = self.scale.inverse(z)
-        for i in reversed(range(self.n_couple_layer)):
-            x = self.AffineLayers[i].inverse(x)
-        return x
+    dxx = tf.transpose(rx) + rx - 2.*xx
+    dyy = tf.transpose(ry) + ry - 2.*yy
+    dxy = tf.transpose(rx) + ry - 2.*zz
+
+    XX = tf.zeros(xx.shape, dtype='float32')
+    YY = tf.zeros(xx.shape, dtype='float32')
+    XY = tf.zeros(xx.shape, dtype='float32')
+
+    for a in [0.05, 0.2, 0.9]:
+        XX += a**2 * 1/(a**2 + dxx)
+        YY += a**2 * 1/(a**2 + dyy)
+        XY += a**2 * 1/(a**2 + dxy)
+
+    return tf.reduce_mean(XX + YY - 2.*XY)
 
 
 if __name__ == "__main__":
@@ -341,12 +241,7 @@ if __name__ == "__main__":
     n_hid_layer = 3
     n_hid_dim = 512
 
-    model1 = NICE(inp_dim, n_couple_layer, n_hid_layer, n_hid_dim)
+    model = NVP(inp_dim, n_couple_layer, n_hid_layer, n_hid_dim, name='NVP')
     x = tfkl.Input(shape=(inp_dim,))
-    model1(x)
-    model1.summary()
-
-    model2 = RealNVP(inp_dim, n_couple_layer, n_hid_layer, n_hid_dim)
-    x = tfkl.Input(shape=(inp_dim,))
-    model2(x)
-    model2.summary()
+    model(x)
+    model.summary()
