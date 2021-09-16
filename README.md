@@ -6,6 +6,8 @@ This repository includes the code example of the invertible neural networks (Ard
 
 2020-11-26 first created
 
+## Open in Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jaekookang/invertible_neural_networks/blob/master/example_gaussian_mixture.ipynb)
+
 
 ## Original works:
 - Paper: http://arxiv.org/abs/1808.04730
