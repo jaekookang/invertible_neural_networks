@@ -5,7 +5,7 @@ Flow based models
 '''
 
 import tensorflow as tf
-from utils import *
+from .utils import *
 
 tfk = tf.keras
 tfkl = tfk.layers
